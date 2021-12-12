@@ -1,0 +1,22 @@
+[package]
+name = "bointer"
+description = "Assorted pointer-related utilities"
+authors = ["Dennis Duda <git@seri.tools>"]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.56"
+license = "MIT OR Apache-2.0"
+keywords = ["pointer", "unsafe"]
+categories = ["rust-patterns", "no-std"]
+
+[features]
+derive = ["bointer-derive"]
+alloc = []
+std = ["alloc"]
+default = ["std", "derive"]
+
+[dependencies]
+bointer-derive = { path = "bointer-derive", optional = true }
+
+[workspace]
+members = ["./bointer-derive"]
