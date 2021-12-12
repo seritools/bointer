@@ -16,7 +16,7 @@ std = ["alloc"]
 default = ["std", "derive"]
 
 [dependencies]
-bointer-derive = { path = "bointer-derive", optional = true }
+bointer-derive = { version = "0.1.0", path = "bointer-derive", optional = true }
 
 [workspace]
 members = ["./bointer-derive"]
