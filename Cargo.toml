@@ -1,13 +1,25 @@
-[package]
-name = "bointer"
-description = "Assorted pointer-related utilities"
-authors = ["Dennis Duda <git@seri.tools>"]
-version = "0.1.0"
+[workspace]
+members = ["./bointer-derive"]
+resolver = "2"
+
+[workspace.package]
+version = "0.2.0"
 edition = "2021"
-rust-version = "1.56"
+rust-version = "1.66"
 license = "MIT OR Apache-2.0"
 keywords = ["pointer", "unsafe"]
 categories = ["rust-patterns", "no-std"]
+
+[package]
+name = "bointer"
+description = "Assorted pointer-related utilities"
+
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [features]
 derive = ["bointer-derive"]
@@ -16,7 +28,4 @@ std = ["alloc"]
 default = ["std", "derive"]
 
 [dependencies]
-bointer-derive = { version = "0.1.0", path = "bointer-derive", optional = true }
-
-[workspace]
-members = ["./bointer-derive"]
+bointer-derive = { version = "0.2.0", path = "bointer-derive", optional = true }

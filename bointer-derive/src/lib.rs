@@ -1,125 +1,96 @@
 extern crate proc_macro;
 
-use proc_macro::TokenStream;
+use proc_macro2::{TokenStream, TokenTree};
 use quote::quote;
-use syn::{parse_macro_input, Data, DeriveInput, Error, Fields, Meta, Type};
+use venial::{parse_declaration, Declaration, Error, StructFields};
 
 #[proc_macro_derive(ReprTransparent)]
-pub fn derive_repr_transparent(input: TokenStream) -> TokenStream {
-    // Parse the input tokens into a syntax tree
-    let input = parse_macro_input!(input as DeriveInput);
-
-    inner(input).unwrap_or_else(|e| TokenStream::from(e.to_compile_error()))
+pub fn derive_repr_transparent(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    parse_declaration(input.into())
+        .and_then(derive)
+        .unwrap_or_else(|e| e.to_compile_error())
+        .into()
 }
 
-fn inner(input: DeriveInput) -> Result<TokenStream, Error> {
-    let name = &input.ident;
+fn derive(decl: Declaration) -> Result<TokenStream, Error> {
+    let Some(repr_attribute) = decl.attributes().iter().find(|attr| {
+        attr.get_single_path_segment()
+            .map(|ident| ident == "repr")
+            .unwrap_or(false)
+    }) else {
+        return Err(Error::new_at_tokens(
+            decl,
+            "This derive only supports types with `#[repr(...)]`",
+        ));
+    };
 
-    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+    if !matches!(
+        repr_attribute.get_value_tokens(),
+        [TokenTree::Ident(id)] if id == "transparent"
+    ) {
+        return Err(Error::new_at_tokens(
+            repr_attribute,
+            "`#[repr(transparent)]` is required to implement `ReprTransparent`",
+        ));
+    }
 
-    check_for_repr_transparent_attribute(&input)?;
+    let (inner_type, inline_generic_args, name, generic_params, where_clause) = match &decl {
+        Declaration::Struct(decl) => {
+            let inner_type =
+                decl.field_types().into_iter().next().ok_or_else(|| {
+                    Error::new_at_tokens(decl, "Struct must have at least one field")
+                })?;
 
-    let wrapped_type = get_wrapped_type(&input)?;
+            (
+                inner_type,
+                decl.get_inline_generic_args(),
+                &decl.name,
+                &decl.generic_params,
+                &decl.where_clause,
+            )
+        }
+        Declaration::Enum(decl) => {
+            let (variant, _) = decl
+                .variants
+                .first()
+                .ok_or_else(|| Error::new_at_tokens(decl, "Enum must have one variant"))?;
+
+            let inner_type = match &variant.contents {
+                StructFields::Unit => {
+                    return Err(Error::new_at_tokens(
+                        variant,
+                        "Enum variant must have at least one field",
+                    ))
+                }
+                StructFields::Tuple(f) => f.fields.first().map(|f| &f.0.ty).ok_or_else(|| {
+                    Error::new_at_tokens(variant, "Enum variant must have at least one field")
+                })?,
+                StructFields::Named(f) => f.fields.first().map(|f| &f.0.ty).ok_or_else(|| {
+                    Error::new_at_tokens(variant, "Enum variant must have at least one field")
+                })?,
+            };
+
+            (
+                inner_type,
+                decl.get_inline_generic_args(),
+                &decl.name,
+                &decl.generic_params,
+                &decl.where_clause,
+            )
+        }
+        _ => return Err(Error::new("This derive only supports structs or enums")),
+    };
 
     // Build the output, possibly using quasi-quotation
-    let expanded = quote! {
-        unsafe impl #impl_generics bointer::ReprTransparent for #name #ty_generics #where_clause {
-            type Wrapped = #wrapped_type;
+    Ok(quote! {
+        unsafe impl #inline_generic_args bointer::ReprTransparent for #name #generic_params #where_clause {
+            type Inner = #inner_type;
 
-            fn into_wrapped(self) -> Self::Wrapped {
+            #[inline(always)]
+            fn into_inner(self) -> Self::Inner {
                 // SAFETY: Safe for the conditions described in the trait documentation.
                 unsafe { core::mem::transmute(self) }
             }
         }
-    };
-
-    // Hand the output tokens back to the compiler
-    Ok(TokenStream::from(expanded))
-}
-
-fn check_for_repr_transparent_attribute(input: &DeriveInput) -> Result<(), Error> {
-    let repr_attr = input
-        .attrs
-        .iter()
-        .find(|attr| attr.path.is_ident("repr"))
-        .ok_or_else(|| {
-            Error::new_spanned(
-                input,
-                "`#[repr(transparent)]` is required to implement `ReprTransparent`",
-            )
-        })?;
-
-    match repr_attr.parse_meta()? {
-        Meta::List(list) => {
-            if !list.nested.iter().any(|nested| match nested {
-                syn::NestedMeta::Meta(meta) => meta.path().is_ident("transparent"),
-                _ => false,
-            }) {
-                return Err(Error::new_spanned(
-                    list,
-                    "`#[repr(transparent)]` is required to implement `ReprTransparent`",
-                ));
-            }
-        }
-        bad => {
-            return Err(Error::new_spanned(
-                bad,
-                "`#[repr(transparent)]` is required to implement `ReprTransparent`",
-            ))
-        }
-    }
-    Ok(())
-}
-
-fn get_wrapped_type(input: &DeriveInput) -> Result<&Type, Error> {
-    let fields = match &input.data {
-        Data::Struct(struct_data) => &struct_data.fields,
-        Data::Enum(enum_data) => {
-            &enum_data
-                .variants
-                .first()
-                .ok_or_else(|| {
-                    Error::new_spanned(
-                        input,
-                        "The enum need exactly one variant to implement `ReprTransparent`",
-                    )
-                })?
-                .fields
-        }
-        Data::Union(_) => {
-            return Err(Error::new_spanned(
-                input,
-                "Unions are not supported by the `ReprTransparent` derive",
-            ))
-        }
-    };
-
-    let ty = match fields {
-        Fields::Named(fields) => {
-            &fields
-                .named
-                .first()
-                .ok_or_else(|| {
-                    Error::new_spanned(fields, "Needs at least one struct/variant field")
-                })?
-                .ty
-        }
-        Fields::Unnamed(fields) => {
-            &fields
-                .unnamed
-                .first()
-                .ok_or_else(|| {
-                    Error::new_spanned(fields, "Needs at least one struct/variant field")
-                })?
-                .ty
-        }
-        Fields::Unit => {
-            return Err(Error::new_spanned(
-                fields,
-                "Needs at least one struct/variant field",
-            ))
-        }
-    };
-
-    Ok(ty)
+    })
 }

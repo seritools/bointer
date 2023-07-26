@@ -1,20 +1,18 @@
 [package]
 name = "bointer-derive"
 description = "Assorted pointer-related utilities (derive macro)"
-authors = ["Dennis Duda <git@seri.tools>"]
-version = "0.1.0"
-edition = "2021"
-rust-version = "1.56"
-license = "MIT OR Apache-2.0"
+
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [lib]
 proc-macro = true
 
 [dependencies]
-syn = { version = "1.0", default-features = false, features = [
-  "derive",
-  "parsing",
-  "proc-macro",
-  "printing",
-] }
+venial = "0.5.0"
 quote = "1.0"
+proc-macro2 = "1.0.66"
